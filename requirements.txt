@@ -1,0 +1,5 @@
+# Anviksha has zero third-party runtime dependencies.
+# It runs on the Python standard library only (Python 3.9+).
+#
+# To start the web app:  python run.py
+# Optionally set:        PORT=8080 python run.py

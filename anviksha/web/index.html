@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Anviksha · a self-learning mind</title>
+<link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="brand">
+      <div class="orb" id="orb" title="brain status"></div>
+      <div>
+        <h1>Anviksha</h1>
+        <p class="sub">a self-learning mind · built from scratch</p>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>Brain</h2>
+      <div class="statgrid">
+        <div class="stat"><span class="k">Version</span><span class="v" id="ver">–</span></div>
+        <div class="stat"><span class="k">Trained tokens</span><span class="v" id="tok">–</span></div>
+        <div class="stat"><span class="k">Vocabulary</span><span class="v" id="vocab">–</span></div>
+        <div class="stat"><span class="k">Knowledge passages</span><span class="v" id="chunks">–</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Memory</h2>
+      <div class="chips" id="memchips"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Skills</h2>
+      <ul id="skills"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Learn something</h2>
+      <textarea id="learnbox" placeholder="Paste knowledge to teach Anviksha…"></textarea>
+      <button id="learnbtn" class="btn">Teach it</button>
+    </section>
+
+    <section class="panel">
+      <h2>Act</h2>
+      <button id="explorebtn" class="btn">Browse the web</button>
+      <button id="evolvebtn" class="btn ghost">Reflect / self-upgrade</button>
+      <div id="netnote" class="netnote"></div>
+    </section>
+
+    <section class="panel grow">
+      <h2>Activity <span id="actcount"></span></h2>
+      <ul id="activity"></ul>
+    </section>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <div class="who">I learn from your knowledge, explore the web, and quietly
+        rewrite my own instructions. Ask me anything.</div>
+      <div class="online" id="online">…</div>
+    </header>
+
+    <section id="chatlog" aria-live="polite"></section>
+
+    <form id="chatbar" autocomplete="off">
+      <textarea id="input" rows="1" placeholder="Message Anviksha…   (try: 'what do you know about …' or 'learn: <paste knowledge>')"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </main>
+</div>
+<script src="/assets/app.js"></script>
+</body>
+</html>
