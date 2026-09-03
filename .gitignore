@@ -1,0 +1,8 @@
+# Runtime-learned state (regenerated automatically) - not committed
+data/store/
+data/web/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
