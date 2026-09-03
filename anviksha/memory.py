@@ -24,6 +24,13 @@ TYPE_LABEL = {FACT: "fact", PREF: "preference", SKILL: "skill",
 # stop words that shouldn't start a "fact" title
 _FACT_STOP = {"a", "an", "the", "of", "is", "are", "was", "be", "to", "in", "it", "that", "what", "how", "why"}
 
+# generic/meta words that shouldn't become a claimed "skill" or interest
+_GENERIC_TOPICS = {"learn", "learned", "learning", "know", "known", "internet",
+                   "web", "online", "you", "your", "self", "progress", "stats",
+                   "curious", "curiosity", "something", "anything", "thing",
+                   "things", "tell", "explain", "about", "journal", "wonder",
+                   "explore", "explored", "browse", "answer", "answers", "question"}
+
 
 def _short(text, n=80):
     text = re.sub(r"\s+", " ", (text or "")).strip()
@@ -125,12 +132,30 @@ class MemoryStore:
         sk.sort(key=lambda m: -(m.get("access_count", 0) * 0.4 + m.get("priority", 0) * 0.6))
         return sk[:limit]
 
+    def user_name(self):
+        """The user's name if it was mentioned in conversation ('call me X')."""
+        for m in reversed(self.memories):
+            if m.get("type") == PREF and "profile" in (m.get("tags") or []):
+                mm = re.search(r"(?:name is|called)\s+(.+)$",
+                               m.get("content", ""), re.I)
+                if mm:
+                    return mm.group(1).strip().title()[:40]
+        return None
+
+    def facts_about(self, query, k=3):
+        return [m for m in self.recall(query, k=k * 3) if m.get("type") in (FACT, WEB)][:k]
+
     def domain_tags(self, limit=20):
-        """Aggregate tags seen across memories (drives autonomous interests)."""
+        """Aggregate tags seen across memories (drives autonomous interests).
+        Structural tags (user profile) are not real subject-matter interests."""
+        structural = {"profile", "user", "self"}
         tagc = {}
         for m in self.memories:
             for t in m.get("tags", []) or []:
-                tagc[t.lower()] = tagc.get(t.lower(), 0) + 1
+                tl = t.lower()
+                if tl in structural or tl in _GENERIC_TOPICS:
+                    continue
+                tagc[tl] = tagc.get(tl, 0) + 1
         return [t for t, _ in sorted(tagc.items(), key=lambda x: -x[1])[:limit]]
 
     # -- decay ----------------------------------------------------------
@@ -157,6 +182,8 @@ class MemoryStore:
     def reflect(self, user_text, reply_text, answer_was_grounded):
         """Extract durable knowledge from a single exchange."""
         added = 0
+        user_text = user_text if isinstance(user_text, str) else str(user_text or "")
+        reply_text = reply_text if isinstance(reply_text, str) else str(reply_text or "")
         # 1. Explicit preference / instruction detection.
         ut = (user_text or "").strip()
         low = ut.lower()
@@ -173,12 +200,13 @@ class MemoryStore:
                     mem = self.add(FACT, s, source="derived", priority=0.55)
                     if mem:
                         added += 1
-        # 3. Skill: the question category signals an area of expertise.
+        # 3. Skill: only claim expertise when it actually answered (grounded),
+        #    and only for a substantive topic - not meta chatter like "learned".
         kw = ["what", "how", "why", "when", "explain", "define", "difference", "example",
               "code", "write", "fix", "error", "summarize", "list", "compare"]
-        if any(k in low for k in kw):
+        if answer_was_grounded and any(k in low for k in kw):
             topic = self._topic_of(ut)
-            if topic:
+            if topic and len(topic) > 2 and topic not in _GENERIC_TOPICS:
                 sk = self.add(SKILL, f"Answers questions about {topic}",
                               source="self-eval", priority=0.6, tags=[topic])
                 if sk:

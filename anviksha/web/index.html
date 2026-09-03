@@ -3,74 +3,186 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Anviksha · a self-learning mind</title>
+<title>Anviksha · a mind that grows</title>
 <link rel="stylesheet" href="/assets/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%235eead4'/><circle cx='38' cy='42' r='7' fill='%230e1116'/><circle cx='62' cy='42' r='7' fill='%230e1116'/><path d='M35 65 Q50 78 65 65' stroke='%230e1116' stroke-width='6' fill='none' stroke-linecap='round'/></svg>" />
 </head>
 <body>
 <div id="app">
-  <aside id="side">
+
+  <!-- ═══════════ header ═══════════ -->
+  <header id="topbar">
     <div class="brand">
-      <div class="orb" id="orb" title="brain status"></div>
-      <div>
-        <h1>Anviksha</h1>
-        <p class="sub">a self-learning mind · built from scratch</p>
+      <div class="orbwrap">
+        <div class="orb" id="orb" title="Anviksha's brain">
+          <div class="orb-core"></div>
+          <div class="orb-ring"></div>
+        </div>
+        <span class="orbmood" id="orbmood"></span>
+      </div>
+      <div class="brandtext">
+        <h1>Anviksha <span class="hin" title="अन्विक्षा · inquiry">अन्विक्षा</span></h1>
+        <p class="stage" id="stageline">a newborn mind · waking up…</p>
       </div>
     </div>
 
-    <section class="panel">
-      <h2>Brain</h2>
-      <div class="statgrid">
-        <div class="stat"><span class="k">Version</span><span class="v" id="ver">–</span></div>
-        <div class="stat"><span class="k">Trained tokens</span><span class="v" id="tok">–</span></div>
-        <div class="stat"><span class="k">Vocabulary</span><span class="v" id="vocab">–</span></div>
-        <div class="stat"><span class="k">Knowledge passages</span><span class="v" id="chunks">–</span></div>
+    <div class="levelwrap" id="levelwrap" title="Growth: learn by chatting, attaching files and exploring">
+      <div class="levelrow">
+        <span id="lvlname">Level 1 · Newborn Mind</span>
+        <span id="xptext">0 XP</span>
       </div>
-    </section>
+      <div class="xpbar"><div class="xpfill" id="xpfill"></div><div class="xpglow" id="xpglow"></div></div>
+      <div class="levelnext" id="levelnext">120 XP until “Babbler”</div>
+    </div>
 
-    <section class="panel">
-      <h2>Memory</h2>
-      <div class="chips" id="memchips"></div>
-    </section>
+    <div class="netwrap">
+      <div id="netpill" class="netpill">checking internet…</div>
+      <div class="quickstats">
+        <span class="qs" title="Knowledge passages">📚 <b id="qs-chunks">0</b></span>
+        <span class="qs" title="Long-term memories">🧠 <b id="qs-mems">0</b></span>
+        <span class="qs" title="Pages explored online">🌐 <b id="qs-pages">0</b></span>
+        <span class="qs" title="Things I'm curious about">💭 <b id="qs-curio">0</b></span>
+      </div>
+    </div>
+  </header>
 
-    <section class="panel">
-      <h2>Skills</h2>
-      <ul id="skills"></ul>
-    </section>
+  <!-- ═══════════ tabs ═══════════ -->
+  <nav id="tabs">
+    <button class="tab active" data-tab="chat">💬 <span>Chat</span></button>
+    <button class="tab" data-tab="progress">📈 <span>Progress</span></button>
+    <button class="tab" data-tab="internet">🌐 <span>Internet</span><em class="dot" id="netdot" hidden></em></button>
+    <button class="tab" data-tab="brain">🧠 <span>Brain</span></button>
+  </nav>
 
-    <section class="panel">
-      <h2>Learn something</h2>
-      <textarea id="learnbox" placeholder="Paste knowledge to teach Anviksha…"></textarea>
-      <button id="learnbtn" class="btn">Teach it</button>
-    </section>
+  <div id="body">
+    <main id="main">
 
-    <section class="panel">
-      <h2>Act</h2>
-      <button id="explorebtn" class="btn">Browse the web</button>
-      <button id="evolvebtn" class="btn ghost">Reflect / self-upgrade</button>
-      <div id="netnote" class="netnote"></div>
-    </section>
+      <!-- ─── chat ─── -->
+      <section class="tabpane active" id="tab-chat">
+        <div id="chatlog" aria-live="polite"></div>
+        <div id="suggests"></div>
+        <div id="attachtray"></div>
+        <form id="chatbar" autocomplete="off">
+          <label class="attachbtn" id="attachbtn" title="Attach files to teach me (txt, md, pdf, docx, pptx, xlsx, csv, json, html, code…)">
+            📎
+            <input type="file" id="fileinput" multiple hidden
+                   accept=".txt,.md,.markdown,.rst,.csv,.tsv,.json,.log,.yaml,.yml,.html,.htm,.xml,.pdf,.docx,.pptx,.xlsx,.py,.js,.ts,.c,.cpp,.h,.java,.go,.rs,.rb,.php,.sh,.sql,.tex,.srt,.vtt,.ini,.toml" />
+          </label>
+          <textarea id="input" rows="1"
+            placeholder="Just talk to me — I learn from ordinary conversation…"></textarea>
+          <button id="send" type="submit" title="Send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 8 6 8-16-8z" fill="currentColor"/></svg>
+          </button>
+        </form>
+      </section>
 
-    <section class="panel grow">
-      <h2>Activity <span id="actcount"></span></h2>
+      <!-- ─── progress ─── -->
+      <section class="tabpane" id="tab-progress">
+        <div class="scroller">
+          <h2 class="panehead">📈 How much I've grown</h2>
+          <div class="cardgrid" id="statcards"></div>
+
+          <div class="duo">
+            <div class="panel">
+              <h2>Growth over time <span class="hint" id="chart-hint"></span></h2>
+              <canvas id="growthchart" width="640" height="240"></canvas>
+              <div class="legend">
+                <span><i style="background:#5eead4"></i> XP</span>
+                <span><i style="background:#818cf8"></i> knowledge passages</span>
+                <span><i style="background:#fbbf24"></i> memories</span>
+              </div>
+            </div>
+            <div class="panel">
+              <h2>Where my knowledge comes from</h2>
+              <div class="donutrow">
+                <canvas id="donut" width="200" height="200"></canvas>
+                <ul class="donutlegend" id="donutlegend"></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="duo">
+            <div class="panel">
+              <h2>Stages of growing up</h2>
+              <ol class="ladder" id="ladder"></ol>
+            </div>
+            <div class="panel">
+              <h2>Recent learning moments <span class="hint">live</span></h2>
+              <ul class="feed" id="recentlearn"></ul>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>My interests (what I know most about)</h2>
+            <div class="bubbles" id="topicbubbles"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── internet ─── -->
+      <section class="tabpane" id="tab-internet">
+        <div class="scroller">
+          <h2 class="panehead">🌐 Learning from the internet</h2>
+
+          <div class="panel netpanel" id="netstatuspanel"></div>
+
+          <div class="rowbtns">
+            <button class="btn" id="explorebtn">🧭 Go explore my curiosities</button>
+            <button class="btn ghost" id="wanderbtn">🎈 Wander randomly</button>
+          </div>
+
+          <div class="duo">
+            <div class="panel">
+              <h2>💭 My wonder journal <span class="hint" id="curiocount"></span></h2>
+              <p class="sub">What I don't know yet — and badly want to. Gaps from
+                our chats burn brightest; exploring satisfies them.</p>
+              <ul class="curiosity" id="curiolist"></ul>
+            </div>
+            <div class="panel">
+              <h2>📔 Web journal <span class="hint" id="journalcount"></span></h2>
+              <p class="sub">Everything I discovered online, newest first.</p>
+              <ul class="journal" id="journallist"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── brain ─── -->
+      <section class="tabpane" id="tab-brain">
+        <div class="scroller">
+          <h2 class="panehead">🧠 Inside my head</h2>
+          <div class="cardgrid" id="braincards"></div>
+          <div class="duo">
+            <div class="panel">
+              <h2>Memory breakdown</h2>
+              <div class="chips" id="memchips"></div>
+              <h2 style="margin-top:14px">Skills I've noticed in myself</h2>
+              <ul class="feed" id="skills"></ul>
+            </div>
+            <div class="panel">
+              <h2>Self-development
+                <button class="btn tiny" id="evolvebtn" title="Reflect & rewrite my self-instructions">✨ Reflect now</button>
+              </h2>
+              <p class="sub">Version <b id="selfver">–</b> · I rewrite my own
+                instructions (SELF.md) as I grow.</p>
+              <div class="selfdoc" id="selfdoc">…</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ═══════════ live activity rail ═══════════ -->
+    <aside id="rail">
+      <h2>⚡ Live activity <span id="actcount"></span></h2>
       <ul id="activity"></ul>
-    </section>
-  </aside>
-
-  <main id="main">
-    <header id="topbar">
-      <div class="who">I learn from your knowledge, explore the web, and quietly
-        rewrite my own instructions. Ask me anything.</div>
-      <div class="online" id="online">…</div>
-    </header>
-
-    <section id="chatlog" aria-live="polite"></section>
-
-    <form id="chatbar" autocomplete="off">
-      <textarea id="input" rows="1" placeholder="Message Anviksha…   (try: 'what do you know about …' or 'learn: <paste knowledge>')"></textarea>
-      <button id="send" type="submit">Send</button>
-    </form>
-  </main>
+    </aside>
+  </div>
 </div>
+
+<div id="toasts"></div>
+<div id="dropoverlay"><div class="dropcard">📎 Drop files here — I'll study them and learn!</div></div>
+
 <script src="/assets/app.js"></script>
 </body>
 </html>

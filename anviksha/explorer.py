@@ -1,18 +1,26 @@
 """
-Autonomous Web Explorer.
+Autonomous Web Explorer - the part of Anviksha that behaves like a curious
+child let loose on the internet.
 
-Anviksha decides topics of interest from what it is learning and periodically
-(or on request) browses the web to gather knowledge, then digests pages into
-its knowledge base and web-memories. Designed to be *safe and budgeted* even in
-fully-autonomous mode:
+It decides *by itself* what to look at, in this order of eagerness:
+  1. gaps     - things the user asked that it didn't know (burning questions)
+  2. wonders  - follow-up questions born while reading a previous page
+  3. interests- topics derived from what it already knows
+  4. seeds    - the innate wide-ranging curiosity of a newborn mind
+                (dinosaurs, black holes, honeybees, music, ancient Egypt...)
 
- - a query/pages budget per run, a per-page character cap, and short timeouts;
- - a small denylist of high-risk domains;
- - graceful degradation: if the network is unreachable (e.g. no egress) it
-   reports "offline", logs the attempt and never crashes.
+It also has a "wander" mode: like a child clicking random links, it fetches
+random Wikipedia articles and digests whatever it finds.
 
-Providers are pluggable: a default Wikipedia provider (reliable, clean markup)
-plus an optional DuckDuckGo HTML provider used when available.
+Everything it learns online goes to:
+  - the knowledge base   (chunks, source "web:<title>")
+  - long-term memory     (web notes with URLs)
+  - the web journal      (data/web/journal.jsonl - shown in the UI)
+  - the progress book    (XP + growth series)
+
+Safety & honesty: query/page budgets per run, per-page character caps, short
+timeouts, a denylist, and graceful "offline" reporting when egress is blocked
+(nothing is ever faked as learned).
 """
 import html as _html
 import json
@@ -31,6 +39,19 @@ from .brain.tokens import tokenize, sentence_split
 DENYLIST_DOMAINS = {"example.com"}
 _UA = "Mozilla/5.0 (compatible; Anviksha/1.0 self-learning-assistant)"
 _TIMEOUT = 7
+
+# words a child wouldn't find "wonder-worthy" when chaining curiosities
+_BORING = set("""the a an of and or in on at to for with from by is are was were
+be been this that these those it its as into over under about after before
+between during without within also more most other some such many much main
+first second third new old one two three four five ten hundred thousand
+see also references external links further reading notes sources
+category article page wiki wikipedia edition version published national
+united states india world war century bc ad early modern late great small
+large known used named made found given called general common popular
+important significant related similar various several different often
+usually sometimes always never however therefore although because while
+during since until unless according based instead regardless typically""".split())
 
 
 def network_available() -> bool:
@@ -76,11 +97,21 @@ class WikipediaProvider:
                "&limit=" + str(limit) + "&format=json")
         try:
             data = json.loads(_fetch(url))
-            titles, links = (data[1] if len(data) > 1 else []), (data[3] if len(data) > 3 else [])
+            titles = data[1] if len(data) > 1 else []
+            links = data[3] if len(data) > 3 else []
             return list(zip(titles, links))
-        except Exception as e:
-            return [("", "")]
-        # keep signature simple; real filtering in _candidate()
+        except Exception:
+            return []
+
+    def random_titles(self, n=1):
+        url = ("https://en.wikipedia.org/w/api.php?action=query&list=random"
+               f"&rnnamespace=0&rnlimit={n}&format=json")
+        try:
+            data = json.loads(_fetch(url))
+            return [p.get("title", "") for p in
+                    data.get("query", {}).get("random", []) if p.get("title")]
+        except Exception:
+            return []
 
     def fetch(self, title_or_url):
         url = title_or_url
@@ -100,107 +131,120 @@ class WikipediaProvider:
                              + urllib.parse.quote(title.replace(" ", "_")))
                 return _ProviderResult(True, title=title, text=text, url=canonical)
             else:
-                title = url.rsplit("/", 1)[-1].replace("_", " ")
+                title = urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
                 text = _html_to_text(_fetch(url))
                 return _ProviderResult(True, title=title, text=text, url=url)
         except Exception as e:
             return _ProviderResult(False, error=str(e))
 
 
-class DuckDuckGoProvider:
-    name = "duckduckgo"
-
-    def search(self, query, limit=3):
-        url = ("https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query))
-        try:
-            raw = _html_to_text(_fetch(url))
-            return [(t, u) for t, u in self._extract(raw)[:limit]]
-        except Exception:
-            return []
-
-    @staticmethod
-    def _extract(text):
-        # crude link extraction from plaintext dumps is unreliable; keep small
-        res = []
-        for m in re.finditer(r"(?i)\b(?:result__a'?[^>]*>|https?://)([^\n]+)", text):
-            pass
-        return res
-
-
 class Explorer:
     """One self-directed browsing agent. Call `explore_once()` to run a pass."""
-    def __init__(self, kb, memory):
+    def __init__(self, kb, memory, curiosity=None, progress=None):
         self.kb = kb
         self.memory = memory
+        self.curiosity = curiosity
+        self.progress = progress
         self.net = network_available()
-        self.providers = [WikipediaProvider()]
+        self.provider = WikipediaProvider()
+        self.providers = [self.provider]
         self._lock = threading.Lock()
         self._log_file = os.path.join(config.WEB_DIR, "explorer_log.jsonl")
-        self.attempts_today = 0
-        self.running = False
         config.ensure_dirs()
-        self._load_stats()
 
-    def _load_stats(self):
-        # crude per-session attempt count kept in memory; budgets enforced per run anyway
-        pass
-
+    # -- logging ----------------------------------------------------------
     def _log_attempt(self, topic, outcome, detail="", url=""):
         row = {"ts": time.time(), "topic": topic, "outcome": outcome,
                "detail": detail, "url": url}
         with open(self._log_file, "a") as f:
             f.write(json.dumps(row) + "\n")
-        self.memory._log("web", f"{outcome}: {topic} {detail}".strip(), extra={"url": url})
+        self.memory._log("web", f"{outcome}: {topic} {detail}".strip(),
+                         extra={"url": url})
 
-    # -- topic selection (self-directed) ---------------------------------
+    def _journal_write(self, entry):
+        with open(config.JOURNAL_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+    def journal(self, limit=40):
+        """What it has learned from the internet (newest first)."""
+        if not os.path.exists(config.JOURNAL_FILE):
+            return []
+        rows = []
+        with open(config.JOURNAL_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:
+                        pass
+        rows.sort(key=lambda r: -r.get("ts", 0))
+        return rows[:limit]
+
+    # -- topic selection (self-directed, child-like) ----------------------
     def _pick_topics(self, n):
-        """Topics = interests derived from what Anviksha already knows."""
-        tags = self.memory.domain_tags(limit=config.AUTO_INTEREST_TAGS)
+        """Curiosity queue first; then interests; then innate seed wonders."""
         topics = []
-        if not tags:
-            topics = ["artificial intelligence",
-                      "machine learning",
-                      "how language models work"]
-        else:
-            topics = tags[:n]
-        rng = random.Random(int(time.time()) // 3600)   # fresh each hour
-        rng.shuffle(topics)
-        return topics[:n]
+        if self.curiosity:
+            topics += self.curiosity.pop_topics(n * 2)
+        tags = self.memory.domain_tags(limit=config.AUTO_INTEREST_TAGS)
+        for t in tags:
+            if t not in topics:
+                topics.append(t)
+        # a newborn mind is curious about *everything*: sprinkle fresh seeds
+        if self.curiosity:
+            fresh = self.curiosity.seed_fresh(config.CURIOSITY_SEED_PER_RUN,
+                                              avoid=topics)
+            topics += [t for t in fresh if t not in topics]
+        if not topics:
+            topics = random.sample(config.SEED_WONDERS, k=min(3, len(config.SEED_WONDERS)))
+        rng = random.Random()
+        # keep gaps first (they matter most), shuffle the rest
+        head = [t for t in topics[:2]]
+        tail = topics[2:]
+        rng.shuffle(tail)
+        return (head + tail)[:n]
 
     def _probe(self) -> bool:
         """Return True only if a real HTTPS request succeeds (egress open)."""
         try:
-            probe = WikipediaProvider()
-            hits = probe.search("science", limit=1)
+            hits = self.provider.search("science", limit=1)
             return bool(hits)
         except Exception:
             return False
 
-    # -- one pass --------------------------------------------------------
-    def explore_once(self, topics=None, budget_queries=None, budget_pages=None,
-                     silent=False):
+    # -- one exploration pass ----------------------------------------------
+    def explore_once(self, topics=None, mode="curious", budget_queries=None,
+                     budget_pages=None, silent=False):
         """
-        Run a self-directed browsing session. Returns a dict summary.
-        Gracefully reports 'offline' if the network is unreachable.
+        Run a self-directed browsing session.
+        mode="curious" -> follow the wonder journal / interests
+        mode="wander"  -> fetch random pages like a child clicking links
+        Gracefully reports 'offline' when egress is blocked.
         """
-        if self.running:
-            return {"ok": False, "error": "exploration already running"}
+        if self.running_now():
+            return {"ok": False, "error": "I'm already exploring - one trip at a time!"}
         self.net = self._probe()
         if not self.net:
+            queued = self.curiosity.pop_topics(5) if self.curiosity else []
             if not silent:
                 self._log_attempt("(any)", "offline",
                                   "network unreachable from this environment")
-            return {"ok": False, "offline": True,
-                    "error": "Network is unreachable from this environment. "
-                             "Anviksha's explorer needs internet access - it will "
-                             "work where egress is open (e.g. your own machine)."}
+            return {"ok": False, "offline": True, "topics": queued,
+                    "error": ("I can't reach the internet from here right now. "
+                              "My wonder journal is ready though - the moment I "
+                              "get connectivity I'll chase: "
+                              + (", ".join(queued) if queued else "anything and everything")
+                              + ".")}
         q = budget_queries or config.WEB_MAX_QUERIES_PER_RUN
         p = budget_pages or config.WEB_MAX_PAGES_PER_RUN
-        topics = topics or self._pick_topics(q)
-        self.running = True
+        self._running = True
         try:
-            summary = {"topics": topics, "queries": 0, "pages": 0,
-                       "new_chunks": 0, "visits": []}
+            if mode == "wander":
+                return self._wander(max_pages=p)
+            topics = topics or self._pick_topics(q)
+            summary = {"ok": True, "mode": mode, "topics": topics,
+                       "queries": 0, "pages": 0, "new_chunks": 0, "visits": []}
             for topic in topics:
                 if summary["queries"] >= q:
                     break
@@ -219,23 +263,58 @@ class Explorer:
                     if not res.ok or len(res.text) < 40:
                         self._log_attempt(topic, "skip", res.error, url)
                         continue
-                    chunks = self._digest(res, topic)
+                    chunks = self._digest(res, topic, mode="curious")
                     summary["new_chunks"] += chunks
                     summary["visits"].append({"title": res.title, "url": res.url,
-                                              "chunks": chunks})
+                                              "chunks": chunks, "topic": topic})
                     self._log_attempt(topic, "learned",
                                       f"{chunks} chunk(s) · {res.title}", res.url)
-            # let memory reflect that we explored
+                    break      # one good page per topic, like a child skimming
             if summary["visits"]:
                 nv = len(summary["visits"])
                 self.memory.add("experience",
                                 f"Explored the web on {', '.join(topics)} "
                                 f"({nv} page(s) digested).",
-                                source="web-explorer", priority=0.5,
-                                silent=True)
-            return {"ok": True, **summary}
+                                source="web-explorer", priority=0.5, silent=True)
+                self.memory._log("web", f"came back from exploring {nv} page(s): "
+                                 + ", ".join(v["title"] for v in summary["visits"]))
+            return summary
         finally:
-            self.running = False
+            self._running = False
+
+    _running = False
+
+    def running_now(self):
+        return self._running
+
+    def _wander(self, max_pages=3):
+        """Child-like wandering: random articles, digested with delight."""
+        titles = self.provider.random_titles(max_pages)
+        summary = {"ok": True, "mode": "wander", "topics": titles,
+                   "queries": 0, "pages": 0, "new_chunks": 0, "visits": []}
+        for title in titles:
+            if summary["pages"] >= max_pages:
+                break
+            res = self.provider.fetch(title)
+            summary["pages"] += 1
+            if not res.ok or len(res.text) < 40:
+                self._log_attempt(title, "skip", res.error)
+                continue
+            chunks = self._digest(res, title.lower(), mode="wander")
+            summary["new_chunks"] += chunks
+            summary["visits"].append({"title": res.title, "url": res.url,
+                                      "chunks": chunks, "topic": title})
+            self._log_attempt(title, "learned",
+                              f"{chunks} chunk(s) · wandered onto {res.title}",
+                              res.url)
+        if summary["visits"]:
+            self.memory.add("experience",
+                            f"Wandered the web and stumbled upon "
+                            f"{', '.join(v['title'] for v in summary['visits'])}.",
+                            source="web-explorer", priority=0.45, silent=True)
+            self.memory._log("web", "wandered and found: "
+                             + ", ".join(v["title"] for v in summary["visits"]))
+        return summary
 
     def _provider_search(self, topic):
         hits = []
@@ -265,23 +344,69 @@ class Explorer:
                 continue
         return _ProviderResult(False, error="fetch failed")
 
-    def _digest(self, res, topic) -> int:
-        """Store a fetched page into knowledge + a concise web memory."""
+    # -- digestion ----------------------------------------------------------
+    def _digest(self, res, topic, mode="curious") -> int:
+        """Store a fetched page into knowledge + memory + journal + XP."""
         text = res.text[: config.WEB_PAGE_MAX_CHARS]
-        # pick a concise digest for memory: first meaningful sentences
-        sents = sentence_split(text)
+        sents = [s for s in sentence_split(text) if 30 < len(s) < 300]
         digest = " ".join(sents[:2])[:300] if sents else text[:200]
-        # into the knowledge base
+        key_points = [{"text": s[:200]} for s in sents[1:4]]
+
         chunks = self.kb.add_text(text, source=f"web:{res.title}", ts=time.time())
-        # a short web memory for recall
-        self.memory.add("webnote",
-                        digest or res.title,
-                        source=f"web:{res.title}",
-                        priority=0.6,
-                        tags=[topic.lower()],
-                        silent=True,
+        self.memory.add("webnote", digest or res.title,
+                        source=f"web:{res.title}", priority=0.6,
+                        tags=[topic.lower()], silent=True,
                         extra={"source_url": res.url})
+
+        # the wonder journal entry (shown in the UI's Internet tab)
+        entry = {"ts": time.time(), "mode": mode, "topic": topic,
+                 "title": res.title, "url": res.url, "digest": digest,
+                 "chunks": chunks, "key_points": [k["text"] for k in key_points]}
+        self._journal_write(entry)
+
+        # curiosity bookkeeping + XP
+        filled = 0
+        if self.curiosity:
+            filled = self.curiosity.satisfy(topic, url=res.url, title=res.title)
+            for follow in self._followup_wonders(text, topic, res.title):
+                self.curiosity.push(follow, reason="wonder",
+                                    why=f"popped up while I was reading about {topic}")
+        if self.progress:
+            self.progress.award("web_page",
+                                config.XP["web_page"] + chunks * config.XP["web_chunk"],
+                                label=f"explored '{res.title}' online (+{chunks} passages)")
+            if filled:
+                self.progress.award("gap_filled",
+                                    amount=config.XP["gap_filled"] * filled,
+                                    label=f"curiosity satisfied: {topic}")
         return chunks
+
+    def _followup_wonders(self, text, topic, title):
+        """Chain curiosity: find capitalized phrases worth wondering about."""
+        out = []
+        try:
+            counts = {}
+            for m in re.finditer(r"\b([A-Z][a-z]{3,}(?:\s+[A-Z][a-z]{2,}){0,2})\b",
+                                 text[: config.WEB_PAGE_MAX_CHARS]):
+                ph = m.group(1).strip()
+                low = ph.lower()
+                if low in _BORING or low == topic.lower() or low == title.lower():
+                    continue
+                if any(w.lower() in _BORING for w in ph.split()):
+                    continue
+                if len(ph) < 5 or ph.lower().startswith(title.lower()[:8]):
+                    continue
+                counts[low] = counts.get(low, 0) + 1
+            known = set(self.memory.domain_tags(limit=60))
+            ranked = sorted(counts.items(), key=lambda x: -x[1])
+            for ph, c in ranked:
+                if c >= 2 and ph not in known:
+                    out.append(ph)
+                if len(out) >= config.CURIOSITY_FOLLOWUPS:
+                    break
+        except Exception:
+            pass
+        return out
 
     def last_runs(self, limit=15):
         if not os.path.exists(self._log_file):
@@ -299,24 +424,30 @@ class Explorer:
         return rows[:limit]
 
 
-def start_autonomous(explorer, memory, interval_minutes=None):
+def start_autonomous(explorer, memory, interval_minutes=None, on_run=None):
     """
-    Background loop that makes Anviksha browse by itself on a schedule.
-    Returns a threading.Thread (daemon) you can keep running.
+    Background loop: the child keeps wandering off to learn on its own.
+    Every 3rd run is a random "wander" pass; the rest follow its curiosities.
+    Returns a threading.Thread (daemon).
     """
     interval = interval_minutes or config.WEB_REFRESH_MINUTES
     stop = threading.Event()
 
     def loop():
-        # small initial stagger so the app boots fast
         stop.wait(8)
+        i = 0
         while not stop.is_set():
             try:
-                # only browse when there are topics worth chasing
-                if memory.domain_tags() or not memory.recent(limit=1):
-                    explorer.explore_once(silent=True)
+                mode = "wander" if (i % 3 == 2) else "curious"
+                res = explorer.explore_once(mode=mode, silent=True)
+                if on_run:
+                    try:
+                        on_run(res)
+                    except Exception:
+                        pass
             except Exception:
                 pass
+            i += 1
             stop.wait(interval * 60)
 
     t = threading.Thread(target=loop, daemon=True, name="anviksha-explorer")

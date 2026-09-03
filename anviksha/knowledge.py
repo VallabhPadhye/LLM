@@ -115,3 +115,40 @@ class KnowledgeBase:
 
     def count(self):
         return self._n
+
+    # -- where did my knowledge come from? -------------------------------
+    @staticmethod
+    def origin_of(source: str) -> str:
+        s = (source or "").lower()
+        if s.startswith("web:"):
+            return "internet"
+        if s.startswith("attachment:") or s.startswith("file:"):
+            return "files"
+        if s.startswith("chat"):
+            return "conversation"
+        if s.startswith("knowledge:"):
+            return "library"
+        return "other"
+
+    def stats_by_origin(self):
+        """Chunks + word counts grouped by learning channel."""
+        out = {}
+        for c in self.chunks:
+            o = self.origin_of(c.get("source", ""))
+            row = out.setdefault(o, {"chunks": 0, "words": 0, "sources": {}})
+            row["chunks"] += 1
+            row["words"] += len(c.get("tokens", []))
+            src = c.get("source", "")
+            row["sources"][src] = row["sources"].get(src, 0) + 1
+        for row in out.values():
+            top = sorted(row["sources"].items(), key=lambda x: -x[1])
+            row["top_sources"] = [{"source": s, "chunks": n} for s, n in top[:8]]
+            del row["sources"]
+        return out
+
+    def recent_chunks(self, limit=25):
+        rows = sorted(self.chunks, key=lambda c: -c.get("ts", 0))[:limit]
+        return [{"ts": c.get("ts", 0), "source": c.get("source", ""),
+                 "origin": self.origin_of(c.get("source", "")),
+                 "preview": c.get("text", "")[:180],
+                 "words": len(c.get("tokens", []))} for c in rows]
